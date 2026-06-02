@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QApplication,
 )
-from core.commands import parse_command
+from core.commands import parse_command,get_history
 
 
 class MainWindow(QWidget):
@@ -60,19 +60,33 @@ class MainWindow(QWidget):
     def handle_command(self):
         user_text = self.command_input.text().strip()
         result = parse_command(user_text)
-            
-       
 
         if not result.is_valid:
             self.note_label.setText(result.error)
             return
+
         if result.target == "exit":
             self.close()
-         
+            return
+
+        if result.target == "history":
+            items = get_history()
+
+            if not items:
+                self.note_label.setText("No history yet.")
+                return
+
+            lines = [
+                f"{item['target']}: {item['prompt']}"
+                for item in items[-3:]
+            ]
+            self.note_label.setText("\n".join(lines))
+            return
 
         self.note_label.setText(
             f"Target: {result.target}\nPrompt: {result.prompt}"
-            )
+        )
+
 
 
     def apply_styles(self):

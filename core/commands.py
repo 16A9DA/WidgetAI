@@ -6,7 +6,11 @@ SUPPORTED_TARGETS = {
     "claude",
     "perplexity",
     "gemini",
+    "exit",
+    "history",
 }
+
+history = []
 
 
 @dataclass
@@ -39,7 +43,15 @@ def parse_command(text: str) -> CommandResult:
     if target not in SUPPORTED_TARGETS:
         return CommandResult(
             is_valid=False,
-            error=f"Unknown target '{target}'. Try /chatgpt, /claude, /perplexity, or /gemini."
+            error=f"Unknown target '{target}'."
+        )
+
+    if target in {"exit", "history"}:
+        return CommandResult(
+            is_valid=True,
+            target=target,
+            prompt="",
+            error=""
         )
 
     if not prompt:
@@ -48,9 +60,18 @@ def parse_command(text: str) -> CommandResult:
             error=f"Please add a message after /{target}."
         )
 
+    history.append({
+        "target": target,
+        "prompt": prompt
+    })
+
     return CommandResult(
         is_valid=True,
         target=target,
         prompt=prompt,
         error=""
     )
+
+
+def get_history():
+    return history
