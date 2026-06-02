@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QLabel,
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
-
+from pathlib import Path
+from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 from .allproviders import get_provider
 
 
@@ -75,7 +76,26 @@ class WebProviderWindow(QWidget):
         layout.addWidget(self.output_box, 2)
 
     def setup_browser(self):
-        self.page = self.browser.page()
+        profile_dir = Path.home() / ".widgetai" / "webprofile"
+        cache_dir = profile_dir / "cache"
+        storage_dir = profile_dir / "storage"
+
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        storage_dir.mkdir(parents=True, exist_ok=True)
+
+        self.profile = QWebEngineProfile("WidgetAIProfile", self)
+        self.profile.setCachePath(str(cache_dir))
+        self.profile.setPersistentStoragePath(str(storage_dir))
+        self.profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
+        )
+        self.profile.setHttpCacheType(
+            QWebEngineProfile.HttpCacheType.DiskHttpCache
+        )
+
+        self.page = QWebEnginePage(self.profile, self.browser)
+        self.browser.setPage(self.page)
+
 
     def setup_timers(self):
         self.poll_timer = QTimer(self)
