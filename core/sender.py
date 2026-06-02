@@ -7,3 +7,5 @@ TARGETS = {
 
 def get_target_url(target: str) -> str | None:
     return TARGETS.get(target)
+
+
