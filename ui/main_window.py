@@ -60,10 +60,15 @@ class MainWindow(QWidget):
     def handle_command(self):
         user_text = self.command_input.text().strip()
         result = parse_command(user_text)
+            
+       
 
         if not result.is_valid:
             self.note_label.setText(result.error)
             return
+        if result.target == "exit":
+            self.close()
+         
 
         self.note_label.setText(
             f"Target: {result.target}\nPrompt: {result.prompt}"
@@ -76,6 +81,7 @@ class MainWindow(QWidget):
                 background-color: #050505;
                 color: #f2f2f2;
                 border: 1px solid #2b2b2b;
+                border-radius: large;
             }
 
             QLabel {
