@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QApplication,
 )
 from core.commands import parse_command,get_history
+from core.sender import send_prompt
 
 
 class MainWindow(QWidget):
@@ -45,7 +46,7 @@ class MainWindow(QWidget):
         )
         self.note_label.setFont(QFont("San Francisco", 9))
 
-        self.footer_label = QLabel("Built: {github link}")
+        self.footer_label = QLabel("Built and instructions: https://github.com/16A9DA/WidgetAI")
         self.footer_label.setFont(QFont("San Francisco",8 ))
 
         layout.addWidget(self.title_label)
@@ -60,6 +61,7 @@ class MainWindow(QWidget):
     def handle_command(self):
         user_text = self.command_input.text().strip()
         result = parse_command(user_text)
+        
 
         if not result.is_valid:
             self.note_label.setText(result.error)
@@ -86,6 +88,8 @@ class MainWindow(QWidget):
         self.note_label.setText(
             f"Target: {result.target}\nPrompt: {result.prompt}"
         )
+        message = send_prompt(result.target, result.prompt)
+        self.note_label.setText(message)
 
 
 
