@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QApplication,
 )
+from core.commands import parse_command
 
 
 class MainWindow(QWidget):
@@ -58,12 +59,16 @@ class MainWindow(QWidget):
 
     def handle_command(self):
         user_text = self.command_input.text().strip()
+        result = parse_command(user_text)
 
-        if not user_text:
-            self.note_label.setText("Please type a command first.")
+        if not result.is_valid:
+            self.note_label.setText(result.error)
             return
 
-        self.note_label.setText(f"Captured: {user_text}")
+        self.note_label.setText(
+            f"Target: {result.target}\nPrompt: {result.prompt}"
+            )
+
 
     def apply_styles(self):
         self.setStyleSheet("""
