@@ -1,16 +1,16 @@
+import os
 import sys
+
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-logging --log-level=3"
+
 from PySide6.QtWidgets import QApplication
-from core.webprovider import WebProviderWindow
+from ui.main_window import MainWindow
 
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("WidgetAI")
 
-    window = WebProviderWindow(
-        "https://chatgpt.com",
-        "Explain random forest in very simple words."
-    )
+    window = MainWindow()
     window.show()
 
     sys.exit(app.exec())
