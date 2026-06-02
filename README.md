@@ -40,6 +40,6 @@ Enter a slash command followed by a prompt, then press Enter.
 
 The project is under construction, more features yet to come.
 
-<!-- TODO:  -->
+## TODO: 
 
 proper message output for tables etc. History chat per model and use history function a memory or a history list if model usage goes down. Model usage limit.
