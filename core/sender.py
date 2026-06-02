@@ -24,6 +24,8 @@ def build_url(target: str, prompt: str) -> str | None:
     if target == "perplexity":
         return f"https://www.perplexity.ai/search?q={encoded_prompt}"
 
+
+
     return None
 
 

@@ -5,7 +5,6 @@ SUPPORTED_TARGETS = {
     "chatgpt",
     "claude",
     "perplexity",
-    "gemini",
     "exit",
     "history",
 }
