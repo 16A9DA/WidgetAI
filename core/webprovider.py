@@ -1,233 +1,174 @@
-from pathlib import Path
-import json
-
-from PySide6.QtCore import QUrl, QTimer
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
-from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
+from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QTextEdit,
+    QLabel,
+)
 from PySide6.QtWebEngineWidgets import QWebEngineView
+
+from .allproviders import get_provider
 
 
 class WebProviderWindow(QWidget):
-    def __init__(self, url: str, prompt: str):
-        super().__init__()
+    def __init__(self, url: str, prompt: str, parent=None):
+        super().__init__(parent)
 
-        self.setWindowTitle("WidgetAI Web Provider")
-        self.resize(1100, 760)
-
+        self.url = url
         self.prompt = prompt
+        self.provider = get_provider(self.url)
+
+        if not self.provider:
+            raise ValueError(f"No provider found for URL: {self.url}")
 
         self.last_response = ""
         self.same_count = 0
+        self.max_same_count = 3
+        self.poll_interval_ms = 2000
+        self.is_finished = False
 
-        layout = QVBoxLayout()
+        self.setWindowTitle(f"{self.provider.name.title()} - Web Provider")
+        self.resize(1200, 900)
+
+        self.setup_ui()
+        self.setup_browser()
+        self.setup_timers()
+
+        self.browser.loadFinished.connect(self.on_load_finished)
+        self.browser.setUrl(QUrl(self.url))
+
+    def setup_ui(self):
+        self.status_label = QLabel(f"Loading {self.url}")
+        self.status_label.setWordWrap(True)
+
+        self.output_box = QTextEdit()
+        self.output_box.setReadOnly(True)
+        self.output_box.setPlaceholderText("AI response will appear here...")
+
+        self.reload_button = QPushButton("Reload")
+        self.inject_button = QPushButton("Inject Prompt")
+        self.submit_button = QPushButton("Submit")
+        self.poll_button = QPushButton("Poll Once")
+        self.stop_button = QPushButton("Stop Polling")
+
+        self.reload_button.clicked.connect(self.reload_page)
+        self.inject_button.clicked.connect(self.inject_prompt)
+        self.submit_button.clicked.connect(self.submit_prompt)
+        self.poll_button.clicked.connect(self.poll_response)
+        self.stop_button.clicked.connect(self.stop_polling)
+
+        button_row = QHBoxLayout()
+        button_row.addWidget(self.reload_button)
+        button_row.addWidget(self.inject_button)
+        button_row.addWidget(self.submit_button)
+        button_row.addWidget(self.poll_button)
+        button_row.addWidget(self.stop_button)
 
         self.browser = QWebEngineView()
 
-        self.output = QTextEdit()
-        self.output.setReadOnly(True)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.status_label)
+        layout.addLayout(button_row)
+        layout.addWidget(self.browser, 3)
+        layout.addWidget(self.output_box, 2)
 
-        layout.addWidget(self.browser, 4)
-        layout.addWidget(self.output, 1)
+    def setup_browser(self):
+        self.page = self.browser.page()
 
-        self.setLayout(layout)
-
-        self.profile = self.create_persistent_profile()
-        self.page = QWebEnginePage(self.profile, self.browser)
-
-        self.browser.setPage(self.page)
-
-        self.browser.loadFinished.connect(self.on_load_finished)
-        self.browser.setUrl(QUrl(url))
-
+    def setup_timers(self):
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self.poll_response)
 
-    def create_persistent_profile(self):
-        base_dir = Path.home() / ".widgetai" / "webengine"
-
-        storage_dir = base_dir / "storage"
-        cache_dir = base_dir / "cache"
-
-        storage_dir.mkdir(parents=True, exist_ok=True)
-        cache_dir.mkdir(parents=True, exist_ok=True)
-
-        profile = QWebEngineProfile("WidgetAIProfile", self)
-
-        profile.setPersistentStoragePath(str(storage_dir))
-        profile.setCachePath(str(cache_dir))
-
-        profile.setPersistentCookiesPolicy(
-            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
-        )
-
-        profile.setHttpCacheType(
-            QWebEngineProfile.HttpCacheType.DiskHttpCache
-        )
-
-        return profile
-
-    def on_load_finished(self, ok):
+    def on_load_finished(self, ok: bool):
         if not ok:
-            self.output.setPlainText("Failed to load page.")
+            self.status_label.setText("Page failed to load.")
             return
 
-        self.output.setPlainText("Page loaded...")
-        QTimer.singleShot(5000, self.inject_prompt)
+        self.status_label.setText(
+            f"Loaded {self.url} with provider: {self.provider.name}"
+        )
+
+        QTimer.singleShot(2000, self.inject_prompt)
+
+    def reload_page(self):
+        self.status_label.setText("Reloading page...")
+        self.last_response = ""
+        self.same_count = 0
+        self.is_finished = False
+        self.stop_polling()
+        self.browser.setUrl(QUrl(self.url))
 
     def inject_prompt(self):
-        prompt_js = json.dumps(self.prompt)
+        if self.is_finished:
+            return
 
-        script = f"""
-        (() => {{
-            const promptText = {prompt_js};
-
-            const editor =
-                document.querySelector('#prompt-textarea') ||
-                document.querySelector('[contenteditable="true"]') ||
-                document.querySelector('[role="textbox"]');
-
-            if (!editor)
-                return "Editor not found";
-
-            editor.focus();
-
-            if (editor.tagName === "TEXTAREA") {{
-                editor.value = promptText;
-                editor.dispatchEvent(
-                    new Event("input", {{ bubbles: true }})
-                );
-            }}
-            else {{
-                editor.textContent = promptText;
-
-                editor.dispatchEvent(
-                    new InputEvent("input", {{
-                        bubbles: true,
-                        data: promptText,
-                        inputType: "insertText"
-                    }})
-                );
-            }}
-
-            return "Prompt inserted";
-        }})();
-        """
-
+        self.status_label.setText("Injecting prompt...")
+        script = self.provider.inject_script(self.prompt)
         self.page.runJavaScript(script, self.after_injection)
 
     def after_injection(self, result):
-        self.output.setPlainText(str(result))
-        QTimer.singleShot(1500, self.submit_prompt)
+        self.status_label.setText(f"Prompt injected: {result}")
+        QTimer.singleShot(1200, self.submit_prompt)
 
     def submit_prompt(self):
-        script = """
-        (() => {
-            const btn =
-                document.querySelector('button[data-testid="send-button"]') ||
-                document.querySelector('button[aria-label*="Send"]') ||
-                document.querySelector('button[aria-label*="send"]');
+        if self.is_finished:
+            return
 
-            if (btn) {
-                if (btn.disabled) {
-                    return "Send button found but disabled";
-                }
-
-                btn.click();
-                return "Send button clicked";
-            }
-
-            const editor =
-                document.querySelector('#prompt-textarea') ||
-                document.querySelector('[contenteditable="true"][role="textbox"]') ||
-                document.querySelector('[contenteditable="true"]');
-
-            if (!editor)
-                return "No editor for Enter fallback";
-
-            editor.focus();
-
-            const enterDown = new KeyboardEvent('keydown', {
-                key: 'Enter',
-                code: 'Enter',
-                keyCode: 13,
-                which: 13,
-                bubbles: true,
-                cancelable: true
-            });
-
-            const enterUp = new KeyboardEvent('keyup', {
-                key: 'Enter',
-                code: 'Enter',
-                keyCode: 13,
-                which: 13,
-                bubbles: true,
-                cancelable: true
-            });
-
-            editor.dispatchEvent(enterDown);
-            editor.dispatchEvent(enterUp);
-
-            return "Enter fallback dispatched";
-        })();
-        """
-
-        self.page.runJavaScript(script, self.after_submit)
-
-
+        self.status_label.setText("Submitting prompt...")
+        script = self.provider.submit_script()
         self.page.runJavaScript(script, self.after_submit)
 
     def after_submit(self, result):
-        self.output.setPlainText(str(result))
+        self.status_label.setText(f"Submit result: {result}")
+        self.start_polling()
 
-        self.last_response = ""
-        self.same_count = 0
+    def start_polling(self):
+        if self.poll_timer.isActive():
+            self.poll_timer.stop()
 
-        self.poll_timer.start(2000)
+        self.status_label.setText("Polling for response...")
+        self.poll_timer.start(self.poll_interval_ms)
+
+    def stop_polling(self):
+        if self.poll_timer.isActive():
+            self.poll_timer.stop()
+        self.status_label.setText("Polling stopped.")
 
     def poll_response(self):
-        script = """
-        (() => {
-            const assistantNodes = [
-                ...document.querySelectorAll('[data-message-author-role="assistant"]')
-            ];
-
-            const texts = assistantNodes
-                .map(el => (el.innerText || el.textContent || "").trim())
-                .filter(Boolean)
-                .filter(t => t.length > 20);
-
-            if (texts.length)
-                return texts[texts.length - 1];
-
-            const articles = [...document.querySelectorAll('article')];
-            if (!articles.length)
-                return "";
-
-            const lastArticle = articles[articles.length - 1];
-            return (lastArticle.innerText || lastArticle.textContent || "").trim();
-        })();
-        """
-
-        self.page.runJavaScript(script, self.handle_poll_result)
-
-
-    def handle_poll_result(self, text):
-        if not text:
+        if self.is_finished:
             return
 
-        # Update bottom window continuously
-        if text != self.last_response:
-            self.output.clear()
-            self.output.setPlainText(text)
+        script = self.provider.extract_script()
+        self.page.runJavaScript(script, self.handle_poll_result)
+
+    def handle_poll_result(self, result):
+        text = (result or "").strip()
+
+        if not text:
+            self.status_label.setText("Waiting for response...")
+            return
+
+        self.output_box.setPlainText(text)
 
         if text == self.last_response:
             self.same_count += 1
         else:
-            self.same_count = 0
             self.last_response = text
+            self.same_count = 0
 
-        if self.same_count >= 3:
-            self.poll_timer.stop()
-            self.output.append("\n\n===== COMPLETE =====")
+        self.status_label.setText(
+            f"Response length: {len(text)} chars | Stable checks: {self.same_count}/{self.max_same_count}"
+        )
 
+        if self.same_count >= self.max_same_count:
+            self.finish_response()
 
+    def finish_response(self):
+        self.is_finished = True
+        self.stop_polling()
+        self.status_label.setText("Response captured successfully.")
+
+    def get_response(self) -> str:
+        return self.output_box.toPlainText().strip()
