@@ -122,26 +122,57 @@ class WebProviderWindow(QWidget):
     def submit_prompt(self):
         script = """
         (() => {
-
             const btn =
-                document.querySelector(
-                    'button[data-testid="send-button"]'
-                ) ||
-                document.querySelector(
-                    'button[aria-label*="Send"]'
-                ) ||
-                document.querySelector(
-                    'button[aria-label*="send"]'
-                );
+                document.querySelector('button[data-testid="send-button"]') ||
+                document.querySelector('button[aria-label*="Send"]') ||
+                document.querySelector('button[aria-label*="send"]');
 
-            if (!btn)
-                return "Send button not found";
+            if (btn) {
+                if (btn.disabled) {
+                    return "Send button found but disabled";
+                }
 
-            btn.click();
+                btn.click();
+                return "Send button clicked";
+            }
 
-            return "Send button clicked";
+            const editor =
+                document.querySelector('#prompt-textarea') ||
+                document.querySelector('[contenteditable="true"][role="textbox"]') ||
+                document.querySelector('[contenteditable="true"]');
+
+            if (!editor)
+                return "No editor for Enter fallback";
+
+            editor.focus();
+
+            const enterDown = new KeyboardEvent('keydown', {
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13,
+                which: 13,
+                bubbles: true,
+                cancelable: true
+            });
+
+            const enterUp = new KeyboardEvent('keyup', {
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13,
+                which: 13,
+                bubbles: true,
+                cancelable: true
+            });
+
+            editor.dispatchEvent(enterDown);
+            editor.dispatchEvent(enterUp);
+
+            return "Enter fallback dispatched";
         })();
         """
+
+        self.page.runJavaScript(script, self.after_submit)
+
 
         self.page.runJavaScript(script, self.after_submit)
 
@@ -156,26 +187,29 @@ class WebProviderWindow(QWidget):
     def poll_response(self):
         script = """
         (() => {
+            const assistantNodes = [
+                ...document.querySelectorAll('[data-message-author-role="assistant"]')
+            ];
 
-            const articles =
-                [...document.querySelectorAll('article')];
+            const texts = assistantNodes
+                .map(el => (el.innerText || el.textContent || "").trim())
+                .filter(Boolean)
+                .filter(t => t.length > 20);
 
+            if (texts.length)
+                return texts[texts.length - 1];
+
+            const articles = [...document.querySelectorAll('article')];
             if (!articles.length)
                 return "";
 
-            const lastArticle =
-                articles[articles.length - 1];
-
-            const text =
-                lastArticle.innerText ||
-                lastArticle.textContent ||
-                "";
-
-            return text.trim();
+            const lastArticle = articles[articles.length - 1];
+            return (lastArticle.innerText || lastArticle.textContent || "").trim();
         })();
         """
 
         self.page.runJavaScript(script, self.handle_poll_result)
+
 
     def handle_poll_result(self, text):
         if not text:
@@ -197,4 +231,3 @@ class WebProviderWindow(QWidget):
             self.output.append("\n\n===== COMPLETE =====")
 
 
-#TODO fix the output bottom window
