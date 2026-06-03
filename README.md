@@ -62,4 +62,7 @@ The project is under construction, more features yet to come.
 
 ## TODO: 
 
-proper message output for tables etc. History chat per model and use history function a memory or a history list if model usage goes down. Model usage limit.
+1. Login issue when initially using ai.
+2. Proper message output for tables and images.
+3. History chat per model and use history function as memory if model usage goes down append history to other chatbots.
+4. Model usage limit.
