@@ -31,15 +31,19 @@ The result is a lightweight desktop workflow for querying multiple AI providers 
 pip install -r requirements.txt
 ```
 
+
 ## Docker
 
-WidgetAI includes a Docker setup for packaging the application environment and running the project in a containerized Linux environment.
+Docker image is available, users can pull and run WidgetAI directly from Docker Hub.
 
-### Build the image
+### Pull the image
 
 ```bash
-docker build -t yourdockerhubusername/widgetai:latest .
+docker pull pa9da/widgetai:latest
 ```
+
+---
+
 
 ## Usage
 
