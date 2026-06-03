@@ -25,6 +25,22 @@ The result is a lightweight desktop workflow for querying multiple AI providers 
 
 ---
 
+##  Pre-requisites
+
+```bash
+pip install -r requirements.txt
+```
+
+## Docker
+
+WidgetAI includes a Docker setup for packaging the application environment and running the project in a containerized Linux environment.
+
+### Build the image
+
+```bash
+docker build -t yourdockerhubusername/widgetai:latest .
+```
+
 ## Usage
 
 Enter a slash command followed by a prompt, then press Enter.
