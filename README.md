@@ -66,3 +66,4 @@ The project is under construction, more features yet to come.
 2. Proper message output for tables and images.
 3. History chat per model and use history function as memory if model usage goes down append history to other chatbots.
 4. Model usage limit.
+5. Command teriminal / keyboard command / deployment
