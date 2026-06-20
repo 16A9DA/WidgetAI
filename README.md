@@ -18,8 +18,8 @@ A terminal-callable desktop widget providing unified access to ChatGPT, Claude, 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/wiai-widget.git
-   cd wiai-widget
+   git clone https://github.com/16A9DA/WidgetAI.git
+   cd WidgetAI
    ```
 
 2. Install dependencies:
