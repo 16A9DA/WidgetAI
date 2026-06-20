@@ -1,6 +1,6 @@
-# WIWI Widget
+# WIAI
 
-WIAI Widget: A terminal-callable desktop widget providing unified access to ChatGPT, Claude, and Perplexity without individual API keys or subscriptions.
+A terminal-callable desktop widget providing unified access to ChatGPT, Claude, and Perplexity without individual API keys or subscriptions.
 
 ## Features
 
