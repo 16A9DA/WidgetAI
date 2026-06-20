@@ -9,10 +9,11 @@ class CommandParser:
             "login": None,
             "clear_all": None,
             "show_history": None,
+            "exit": None,
         }
 
     def set_callbacks(
-        self, switch_service=None, login=None, clear_all=None, show_history=None
+        self, switch_service=None, login=None, clear_all=None, show_history=None, exit=None
     ):
         if switch_service:
             self.callbacks["switch_service"] = switch_service
@@ -22,6 +23,8 @@ class CommandParser:
             self.callbacks["clear_all"] = clear_all
         if show_history:
             self.callbacks["show_history"] = show_history
+        if exit:
+            self.callbacks["exit"] = exit
 
     def parse_command(self, command_text):
         command_text = command_text.strip()
@@ -55,15 +58,21 @@ class CommandParser:
 
         elif command == "helpme":
             return (
-                "Available commands: /chatgpt, /claude, /perplexity, /login, /history, /clear-all, /helpme\n"
-                "/chatgpt - Switch to ChatGPT service\n"
-                "/claude - Switch to Claude service\n"
-                "/perplexity - Switch to Perplexity service\n"
-                "/login - Login to current service\n"
-                "/history - Show conversation history\n"
-                "/clear-all - Clear chat and history\n"
-                "/helpme - Show this help message"
+                "/command                  usage\n"
+                "/chatgpt                  Switch to ChatGPT service\n"
+                "/claude                   Switch to Claude service\n"
+                "/perplexity               Switch to Perplexity service\n"
+                "/login                    Login to current service\n"
+                "/history                  Show conversation history\n"
+                "/clear-all                Clear chat and history\n"
+                "/helpme                   Show this help message\n"
+                "/exit                     Exit the widget"
             )
 
+        elif command == "exit":
+            if self.callbacks["exit"]:
+                return self.callbacks["exit"]()
+            return "Exit functionality not implemented"
+
         else:
-            return f"Unknown command: {command}. Available commands: /chatgpt, /claude, /perplexity, /login, /history, /clear-all, /helpme"
+            return f"Unknown command: {command}. Available commands: /chatgpt, /claude, /perplexity, /login, /history, /clear-all, /helpme, /exit"

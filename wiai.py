@@ -33,7 +33,17 @@ class QueryWorker(QThread):
     def run(self):
 
         try:
-            response = self.browser_handler.send_query(self.query)
+            # Start sending the query
+            self.browser_handler.send_query(self.query)
+
+            # Wait for response to be ready (with timeout)
+            if self.browser_handler.wait_for_response(timeout_ms=15000):  # 15 second timeout
+                response = self.browser_handler.get_response()
+                if not response:
+                    response = "Error: No response received from service"
+            else:
+                response = "Error: Timeout waiting for response from service"
+
             self.finished.emit(response)
         except Exception as e:
             self.finished.emit(f"Error: {str(e)}")
@@ -54,6 +64,7 @@ class WIWIWidget(QMainWindow):
         self.browser_handler = BrowserHandler(self.login_manager)
 
         self.active_service = "chatgpt"
+        self.current_query = None
 
         self.setup_ui()
 
@@ -62,6 +73,7 @@ class WIWIWidget(QMainWindow):
             login=self.handle_login,
             clear_all=self.clear_all,
             show_history=self.show_history,
+            exit=self.handle_exit,
         )
 
         self.check_login_status()
@@ -209,6 +221,7 @@ class WIWIWidget(QMainWindow):
         self.chat_display.append("<b>System:</b> Processing...")
         self.send_button.setEnabled(False)
         self.input_field.setEnabled(False)
+        self.current_query = query
 
         self.worker = QueryWorker(self.browser_handler, query)
         self.worker.finished.connect(self.query_finished)
@@ -221,7 +234,7 @@ class WIWIWidget(QMainWindow):
         self.input_field.setEnabled(True)
         self.input_field.setFocus()
 
-        self.history_manager.add_entry(query, response, self.active_service)
+        self.history_manager.add_entry(self.current_query, response, self.active_service)
 
     def switch_service(self, service):
 
@@ -238,7 +251,6 @@ class WIWIWidget(QMainWindow):
 
         self.history_manager.clear()
         self.chat_display.clear()
-        self.chat_display.append("<b>System:</b> History cleared")
         return "History cleared"
 
     def show_history(self):
@@ -252,6 +264,10 @@ class WIWIWidget(QMainWindow):
             history_text += f"<b>{entry['service'].title()}:</b> {entry['query']} → {entry['response']}<br><br>"
 
         return history_text
+
+    def handle_exit(self):
+        self.close()
+        return "Exiting application..."
 
     def check_login_status(self):
 
