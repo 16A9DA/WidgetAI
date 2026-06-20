@@ -1,14 +1,9 @@
-"""
-History manager for storing and retrieving conversation history.
-"""
-
 import json
 import os
 from datetime import datetime
 
 
 class HistoryManager:
-    """Manages conversation history."""
 
     def __init__(self, history_file="history.json"):
         self.history_file = history_file
@@ -18,7 +13,7 @@ class HistoryManager:
         """Load history from file."""
         if os.path.exists(self.history_file):
             try:
-                with open(self.history_file, 'r') as f:
+                with open(self.history_file, "r") as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 return []
@@ -27,7 +22,7 @@ class HistoryManager:
     def save_history(self):
         """Save history to file."""
         try:
-            with open(self.history_file, 'w') as f:
+            with open(self.history_file, "w") as f:
                 json.dump(self.history, f, indent=2)
         except IOError:
             pass  # Silently fail if we can't save
@@ -35,10 +30,10 @@ class HistoryManager:
     def add_entry(self, query, response, service):
         """Add a new entry to history."""
         entry = {
-            'timestamp': datetime.now().isoformat(),
-            'query': query,
-            'response': response,
-            'service': service
+            "timestamp": datetime.now().isoformat(),
+            "query": query,
+            "response": response,
+            "service": service,
         }
         self.history.append(entry)
         self.save_history()
