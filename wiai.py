@@ -119,10 +119,17 @@ class WIWIWidget(QMainWindow):
     def _wire_signals(self):
         self.browser_handler.response_ready.connect(self._on_response_ready)
         self.browser_handler.login_state_changed.connect(self._on_login_state_changed)
+        self.browser_handler.login_url_loaded.connect(self._on_login_url_loaded)
 
     def _on_login_state_changed(self, service, logged_in):
         self._append_system(f"login state: {service} -> {'logged in' if logged_in else 'logged out'}")
         self._update_status()
+
+    def _on_login_url_loaded(self, service, ok):
+        if ok:
+            self._append_system(f"login page loaded for {service}; sign in there.")
+        else:
+            self._append_system(f"login page failed to load for {service}; check the browser window or try again.")
 
     def _tick_clock(self):
         now = datetime.now().strftime("%H:%M:%S")

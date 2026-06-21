@@ -1,6 +1,6 @@
 import os
 import time
-from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot, Qt
 from PySide6.QtWebEngineCore import QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
@@ -30,6 +30,7 @@ class BrowserHandler(QObject):
 
     response_ready = Signal(str)
     login_state_changed = Signal(str, bool)
+    login_url_loaded = Signal(str, bool)
 
     def __init__(self, login_manager):
         super().__init__()
@@ -90,16 +91,33 @@ class BrowserHandler(QObject):
         view = self.browsers.get(service)
         if not view:
             return False
-        if service != self.active_service:
-            self.set_active_service(service)
+
+        self.set_active_service(service)
+
         url = self.login_manager.login_url(service)
         if not url:
             return False
+
+        view.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
+        view.setAttribute(Qt.WA_DeleteOnClose, False)
+        view.setWindowTitle(f"Login - {service.title()}")
+        view.resize(1100, 800)
+
         view.show()
         view.raise_()
-        view.setVisible(True)
+        view.activateWindow()
+
+        try:
+            view.stop()
+        except Exception:
+            pass
         view.load(QUrl(url))
         self.login_manager.mark_logged_in(service, False)
+
+        try:
+            view.page().loadFinished.connect(lambda ok, s=service: self._on_login_page_loaded(s, ok))
+        except Exception:
+            pass
 
         if service in self._login_timers:
             self._login_timers[service].stop()
@@ -111,6 +129,9 @@ class BrowserHandler(QObject):
         self._login_timers[service] = timer
         self._login_started_at[service] = time.time()
         return True
+
+    def _on_login_page_loaded(self, service, ok):
+        self.login_url_loaded.emit(service, bool(ok))
 
     def _poll_login(self, service):
         view = self.browsers.get(service)
