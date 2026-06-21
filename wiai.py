@@ -1,6 +1,7 @@
 import sys
 from datetime import datetime
-from PySide6.QtCore import Qt, QTimer
+from html import escape
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -9,8 +10,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QTextEdit,
     QLineEdit,
+    QLabel,
 )
-from PySide6.QtGui import QFont
 
 from browser_handler import BrowserHandler
 from command_parser import CommandParser
@@ -111,7 +112,6 @@ class WIWIWidget(QMainWindow):
         self._tick_clock()
 
     def _make_label(self, text, size=10, color="#c9d1d9"):
-        from PySide6.QtWidgets import QLabel
         lbl = QLabel(text)
         lbl.setStyleSheet(f"color: {color}; font-size: {size}pt; background: transparent;")
         return lbl
@@ -151,7 +151,6 @@ class WIWIWidget(QMainWindow):
         self._append_line(self.active_service, text, "#7ee787")
 
     def _append_line(self, prefix, text, color):
-        from html import escape
         ts = datetime.now().strftime("%H:%M:%S")
         self.chat_display.append(
             f"<span style='color:#6e7681'>[{ts}]</span> "
@@ -238,7 +237,6 @@ class WIWIWidget(QMainWindow):
         entries = self.history_manager.get_recent(10)
         if not entries:
             return "No history."
-        from html import escape
         self.chat_display.append(
             "<span style='color:#58a6ff'>─── history ───</span>"
         )
@@ -258,6 +256,10 @@ class WIWIWidget(QMainWindow):
     def _handle_exit(self):
         QTimer.singleShot(0, self.close)
         return ""
+
+    def closeEvent(self, event):
+        self.browser_handler.shutdown()
+        super().closeEvent(event)
 
 
 def main():

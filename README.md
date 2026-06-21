@@ -1,111 +1,78 @@
 # WIAI
 
-A terminal-callable desktop widget providing unified access to ChatGPT, Claude, and Perplexity without individual API keys or subscriptions.
+A compact desktop widget that gives a single command-line interface to ChatGPT, Claude, and Perplexity through their free web interfaces, no API keys required.
 
 ## Features
 
-- Terminal Accessible: Launch with `/wiai` command from terminal
-- Multi-Service Support: Access ChatGPT, Claude, and Perplexity in one interface
-- Secure Login: Handle authentication for each service
-- Conversation History: Track and review conversations
-- Clear History: Easily wipe conversation data
-- Cross-Platform: Works on Windows, macOS, and Linux
-- Docker Ready: Containerized for easy deployment
+- Compact, terminal-style Qt widget, designed to stay small not to fill the screen
+- Slash-command-only interaction, no buttons or chrome
+- Multi-service support: ChatGPT, Claude, Perplexity
+- Persistent login via `~/.wiai/profile` cookies, sign in once per service
+- Conversation history saved to `history.json` and browsable through the widget
+- Cross-platform: works wherever PySide6 runs (Windows, macOS, Linux/X11)
+- Docker-ready
 
 ## Installation
 
-### Local Installation
+### Local
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/16A9DA/WidgetAI.git
-   cd WidgetAI
-   ```
+```bash
+git clone https://github.com/16A9DA/WidgetAI.git
+cd WidgetAI
+pip install -r requirements.txt
+python wiai.py
+```
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Docker
 
-3. Run the application:
-   ```bash
-   python wiai.py
-   ```
+```bash
+docker build -t wiai .
+docker run --rm -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix wiai
+```
 
-### Docker Installation
+## Commands
 
-1. Build the Docker image:
-   ```bash
-   docker build -t wiai .
-   ```
+| Command            | What it does                            |
+| ------------------ | --------------------------------------- |
+| `/chatgpt`         | switch to ChatGPT                       |
+| `/claude`          | switch to Claude                        |
+| `/perplexity`      | switch to Perplexity                    |
+| `/login [provider]` | log in to a provider (or current one)   |
+| `/help` / `/helpme` | show this help                          |
+| `/history`         | show recent history                     |
+| `/clear-all`       | clear chat output and stored history    |
+| `/exit`            | quit the widget                         |
 
-2. Run the container:
-   ```bash
-   docker run -it --rm \
-     -e DISPLAY=$DISPLAY \
-     -v /tmp/.X11-unix:/tmp/.X11-unix \
-     wiai-widget
-   ```
+Anything that does not start with `/` is sent to the currently active provider as a prompt.
 
-## Usage
+## Workflow
 
-### Basic Commands
-
-Once the widget is running, use these slash commands:
-
-- `/chatgpt` Switch to ChatGPT service
-- `/claude` Switch to Claude service
-- `/perplexity` Switch to Perplexity service
-- `/login` Login to the current active service
-- `/history` Show conversation history
-- `/clear-all` Clear all conversation history
-
-### Example Workflow
-
-1. Launch the widget: `python wiai.py`
-2. Switch to preferred service: `/claude`
-3. Login if needed: `/login` (complete login in the popped-up window)
-4. Start chatting: Type questions directly
-5. Switch services: `/chatgpt` to talk to ChatGPT instead
-6. Review history: `/history` to see past conversations
-7. Clear data: `/clear-all` to start fresh
+1. Launch: `python wiai.py`
+2. If not logged in: `/login chatgpt` (or whichever service) and complete the sign-in shown in the popped-up browser
+3. Pick a provider: `/chatgpt`, `/claude`, or `/perplexity`
+4. Type a prompt into the input line and press Enter
+5. Switch providers mid-session without re-logging in, persistent cookies stay valid until you `/clear-all` the cookies manually
 
 ## Architecture
 
-The widget follows a clean modular architecture:
+- `wiai.py` - Qt main window, signal wiring, command dispatch
+- `browser_handler.py` - one persistent `QWebEngineView` per service; JS injection for sending prompts and extracting the latest assistant reply
+- `command_parser.py` - slash-command parsing and validation
+- `history_manager.py` - JSON-backed history (`history.json`)
+- `login_manager.py` - tracks per-provider login state
 
-- wiai.py: Main application with Qt GUI
-- browser_handler.py: Manages hidden browser instances for each service
-- command_parser.py: Handles slash command parsing and execution
-- history_manager.py: Stores and retrieves conversation history
-- login_manager.py: Manages authentication states and login flows
+Cookies and storage live in `~/.wiai/profile`, configured as a persistent `QWebEngineProfile` in `browser_handler.py`.
 
-## How It Works
+## How it works
 
-1. The widget uses QtWebEngine to create hidden browser instances for each service.
-2. When a query is typed, it is sent to the active service's browser.
-3. Responses are captured and displayed in the chat interface.
-4. Login processes use visible browsers for security, then transfer session to hidden browsers.
-5. All conversations are stored locally in history.json.
-6. Slash commands allow switching services and managing the widget.
+Each provider has a long-lived browser view loaded with the service's URL. When you send a prompt, the widget injects JavaScript that types the prompt into the existing input box on the page and clicks submit. A polling loop runs JS that returns the latest assistant message from the DOM.
 
-## Security and Privacy
+Login works the same way: `/login provider` brings the existing service view to the front and navigates it to that service's login URL. The widget watches the URL/dominant content until it no longer matches `/login`/`/auth` paths, then marks the provider as logged in. Cookies persist for future sessions.
 
-- All data is stored locally on the machine.
-- No API keys are needed or stored.
-- Login credentials are handled by the official service websites.
-- Conversation history is saved only locally and can be cleared anytime.
-- The widget does not modify or intercept communications with the services.
+## Privacy
 
-## Customization
-
-For developers looking to extend or modify the widget:
-
-- Add new services by extending service lists in browser_handler.py and login_manager.py.
-- Improve response parsing by implementing actual DOM traversal in browser_handler.py.
-- Enhance history management with search, filtering, or export features.
-- Add settings panel for configuring appearance and behavior.
-
-## Acknowledgments
-
-Built with PySide6, inspired by the desire to make AI services more accessible without managing multiple subscriptions or API keys.
+- All data stays on the local machine.
+- No API keys are stored or needed.
+- Authentication uses each provider's website directly.
+- History lives in `history.json` and can be wiped with `/clear-all`.
+- Cookies live in `~/.wiai/profile` and are removed only when the directory is deleted or the widget is uninstalled.

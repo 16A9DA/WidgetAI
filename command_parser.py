@@ -75,14 +75,16 @@ class CommandParser:
 
     def _help_text(self):
         lines = [
-            ("/chatgpt", "Switch to ChatGPT service"),
-            ("/claude", "Switch to Claude service"),
-            ("/perplexity", "Switch to Perplexity service"),
-            ("/login [provider]", "Login to provider (chatgpt/claude/perplexity)"),
-            ("/history", "Show conversation history"),
-            ("/clear-all", "Clear chat and history"),
-            ("/helpme", "Show this help message"),
-            ("/exit", "Exit the widget"),
+            ("/command", "usage"),
+            ("/chatgpt", "switch to ChatGPT"),
+            ("/claude", "switch to Claude"),
+            ("/perplexity", "switch to Perplexity"),
+            ("/login [provider]", "log in to a provider"),
+            ("/history", "show recent history"),
+            ("/clear-all", "clear output and history"),
+            ("/help", "show this help"),
+            ("/helpme", "alias of /help"),
+            ("/exit", "quit the widget"),
         ]
         max_cmd = max(len(cmd) for cmd, _ in lines)
-        return "\n".join(f"  {cmd:<{max_cmd + 2}}{desc}" for cmd, desc in lines)
+        return "\n".join(f"{cmd:<{max_cmd + 4}}{desc}" for cmd, desc in lines)
