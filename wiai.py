@@ -1,7 +1,7 @@
 import sys
 from datetime import datetime
 from html import escape
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -48,6 +48,9 @@ class WIWIWidget(QMainWindow):
         self.setWindowTitle("WIAI")
         self.resize(420, 540)
         self.setMinimumSize(360, 360)
+        self.setWindowFlags(
+            self.windowFlags() | Qt.Tool | Qt.WindowStaysOnTopHint
+        )
 
         self.history_manager = HistoryManager()
         self.login_manager = LoginManager()
@@ -57,6 +60,7 @@ class WIWIWidget(QMainWindow):
         self.active_service = "chatgpt"
         self.current_query = None
         self._busy = False
+        self._drag_pos = None
 
         self._setup_ui()
         self._wire_signals()
@@ -188,12 +192,26 @@ class WIWIWidget(QMainWindow):
             return
 
         self.current_query = query
+        full = self._build_contextual_query(query)
         self._append_system(f"-> {self.active_service}")
         self._set_busy(True)
 
-        if not self.browser_handler.send_query(query):
+        if not self.browser_handler.send_query(full):
             self._append_system("Error: failed to dispatch query")
             self._set_busy(False)
+
+    def _build_contextual_query(self, query):
+        recent = self.history_manager.get_recent(3)
+        if not recent:
+            return query
+        lines = ["Previous context:"]
+        for entry in recent:
+            svc = entry.get("service", "?")
+            q = (entry.get("query", "") or "").splitlines()[0][:80]
+            r = (entry.get("response", "") or "")[:100].replace("\n", " ")
+            lines.append(f"  [{svc}] Q:{q}  A:{r}")
+        lines.append("Current question:")
+        return "\n".join(lines) + "\n" + query
 
     def _on_response_ready(self, response):
         text = (response or "").strip()
