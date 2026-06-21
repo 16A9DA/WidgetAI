@@ -1,258 +1,213 @@
 import time
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEnginePage
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QUrl, QTimer, QEventLoop
 
 
-class BrowserHandler:
+class BrowserHandler(QObject):
+
+    response_ready = Signal(str)
+
+    SERVICE_URLS = {
+        "chatgpt": "https://chatgpt.com/",
+        "claude": "https://claude.ai/chats",
+        "perplexity": "https://www.perplexity.ai/",
+    }
 
     def __init__(self, login_manager):
+        super().__init__()
         self.login_manager = login_manager
         self.browsers = {}
-        self.pages = {}
-        self.active_browser = None
         self.active_service = None
-        self.response_ready = False
-        self.response_text = ""
+        self._pending_query = None
+        self._known_response_count = 0
+        self._poll_timer = None
+        self._query_started_at = None
 
-        self.initialize_browsers()
+        self._init_browsers()
 
-    def initialize_browsers(self):
-        services = ["chatgpt", "claude", "perplexity"]
-        urls = {
-            "chatgpt": "https://chat.openai.com/",
-            "claude": "https://claude.ai/chats",
-            "perplexity": "https://www.perplexity.ai/",
-        }
-
-        for service in services:
-            browser = QWebEngineView()
-            browser.setVisible(False)
-            browser.resize(1024, 768)
-
-            page = QWebEnginePage(browser)
-            browser.setPage(page)
-
-            page.loadFinished.connect(
-                lambda ok, s=service: self.on_load_finished(ok, s)
-            )
-
-            self.browsers[service] = browser
-            self.pages[service] = page
+    def _init_browsers(self):
+        for service, url in self.SERVICE_URLS.items():
+            view = QWebEngineView()
+            view.setVisible(False)
+            view.resize(1280, 800)
+            view.load(QUrl(url))
+            self.browsers[service] = view
 
         self.set_active_service("chatgpt")
 
     def set_active_service(self, service):
-
         if service in self.browsers:
             self.active_service = service
-            self.active_browser = self.browsers[service]
+            view = self.browsers[service]
+            if view.url() and view.url().toString() != self.SERVICE_URLS[service]:
+                view.load(QUrl(self.SERVICE_URLS[service]))
             return True
         return False
 
-    def on_load_finished(self, ok, service):
-
-        if ok:
-            print(f"{service} page loaded successfully")
-        else:
-            print(f"Failed to load {service} page")
+    def show_active_browser(self):
+        if self.active_service and self.active_service in self.browsers:
+            view = self.browsers[self.active_service]
+            view.setVisible(True)
+            view.show()
+            view.raise_()
+            view.activateWindow()
 
     def send_query(self, query):
-        if not self.active_browser or not self.active_service:
-            return "Error: No active browser"
+        if not self.active_service:
+            return False
 
-        self.response_ready = False
-        self.response_text = ""
+        view = self.browsers[self.active_service]
+        url = view.url().toString()
 
-        return self._execute_query_javascript(query)
+        if not self.SERVICE_URLS[self.active_service].split("/")[2] in url:
+            view.loadFinished.connect(lambda ok, s=self.active_service: self._run_inject(s, query))
+        else:
+            self._inject_query(view, query)
 
-    def get_response(self):
-        """Return the last captured response text."""
-        return self.response_text
+        self._pending_query = query
+        self._query_started_at = time.time()
+        self._start_response_polling()
+        return True
 
-    def _execute_query_javascript(self, query):
-        """Inject query into the active service's input field and submit."""
-        # Escape the query string for safe JS embedding
-        escaped = query.replace("\\", "\\\\")
-        escaped = escaped.replace("'", "\\'")
-        escaped = escaped.replace('"', '\\"')
-        escaped = escaped.replace("`", "\\`")
-        escaped = escaped.replace("\n", "\\n")
+    def _run_inject(self, service, query):
+        if service in self.browsers and query:
+            self._inject_query(self.browsers[service], query)
 
-        js_script = f"""
+    def _inject_query(self, view, query):
+        js = self._build_inject_js(query)
+        view.page().runJavaScript(js)
+
+    def _build_inject_js(self, query):
+        escaped = (
+            query.replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\n", "\\n")
+            .replace("\r", "")
+        )
+
+        return f"""
         (function() {{
             const url = window.location.href;
             let input = null;
-            let submitButton = null;
+            let submitBtn = null;
 
-            // Provider-specific selectors
             if (url.includes('claude.ai')) {{
-                input = document.querySelector('div[contenteditable="true"][data-placeholder*="Ask"], div[contenteditable="true"]');
-                submitButton = document.querySelector('button[aria-label*="Send"], button[aria-label*="send"]');
-            }} else if (url.includes('chat.openai.com') || url.includes('chatgpt.com')) {{
-                input = document.querySelector('textarea[id="prompt-textarea"], textarea[placeholder*="Ask"], div[contenteditable="true"]');
-                submitButton = document.querySelector('button[data-testid="send-button"], button[aria-label*="Send"]');
+                input = document.querySelector('div[contenteditable="true"]');
+                submitBtn = document.querySelector('button[aria-label*="Send" i]');
+            }} else if (url.includes('chatgpt.com') || url.includes('chat.openai.com')) {{
+                input = document.querySelector('textarea#prompt-textarea, textarea[placeholder*="Ask" i]');
+                submitBtn = document.querySelector('button[data-testid="send-button"]');
             }} else if (url.includes('perplexity.ai')) {{
-                input = document.querySelector('textarea[placeholder*="Ask"], textarea, div[contenteditable="true"]');
-                submitButton = document.querySelector('button[aria-label*="Submit"], button[type="submit"], button svg');
+                input = document.querySelector('textarea[placeholder*="Ask" i], textarea');
+                submitBtn = document.querySelector('button[aria-label*="Submit" i]');
             }} else {{
                 input = document.querySelector('textarea, div[contenteditable="true"]');
-                submitButton = document.querySelector('button[type="submit"]');
+                submitBtn = document.querySelector('button[type="submit"], button[aria-label*="Send" i]');
             }}
 
-            if (!input) {{
-                console.error('WIAI: Could not find input element');
-                return false;
-            }}
+            if (!input) return 'no-input';
 
-            // Focus and clear
             input.focus();
             if (input.tagName === 'TEXTAREA') {{
                 input.value = '';
-            }} else if (input.contentEditable) {{
-                input.innerHTML = '<p><br></p>';
-            }}
-
-            // Set query text
-            const queryText = '{escaped}';
-            if (input.tagName === 'TEXTAREA') {{
-                input.value = queryText;
             }} else {{
-                input.innerHTML = '<p>' + queryText.replace(/\\n/g, '<br>') + '</p>';
+                input.innerHTML = '';
+                const p = document.createElement('p');
+                p.textContent = '{escaped}';
+                input.appendChild(p);
             }}
+            input.value = input.tagName === 'TEXTAREA' ? '{escaped}' : input.innerText;
 
-            // Dispatch input event to trigger any listeners
             input.dispatchEvent(new Event('input', {{ bubbles: true }}));
             input.dispatchEvent(new Event('change', {{ bubbles: true }}));
 
-            // Try to click submit button, fallback to Enter key
-            let submitted = false;
-            if (submitButton && submitButton.offsetParent !== null) {{
-                submitButton.click();
-                submitted = true;
+            if (submitBtn && submitBtn.offsetParent !== null) {{
+                submitBtn.click();
+                return 'submitted';
             }}
 
-            if (!submitted) {{
-                const enterEvent = new KeyboardEvent('keydown', {{
-                    key: 'Enter',
-                    code: 'Enter',
-                    keyCode: 13,
-                    bubbles: true,
-                    cancelable: true,
-                }});
-                input.dispatchEvent(enterEvent);
-            }}
-
-            return true;
+            const ev = new KeyboardEvent('keydown', {{
+                key: 'Enter', code: 'Enter', keyCode: 13,
+                bubbles: true, cancelable: true,
+            }});
+            input.dispatchEvent(ev);
+            return 'enter-sent';
         }})();
         """
 
-        if self.active_browser and self.active_browser.page():
-            self.active_browser.page().runJavaScript(js_script)
-            return True
-        return False
+    def _start_response_polling(self):
+        if self._poll_timer:
+            self._poll_timer.stop()
 
-    def wait_for_response(self, timeout_ms=20000):
-        import time
+        self._poll_timer = QTimer()
+        self._poll_timer.setInterval(1500)
+        self._poll_timer.timeout.connect(self._poll_response)
+        self._poll_timer.start()
 
-        start_time = time.time()
-        while (time.time() - start_time) * 1000 < timeout_ms:
-            response_text = self._check_for_response()
-            if response_text and len(response_text.strip()) > 0:
-                self.response_ready = True
-                self.response_text = response_text.strip()
-                return True
-            time.sleep(0.5)
-        return False
+    @Slot()
+    def _poll_response(self):
+        if not self.active_service:
+            return
 
-    def _check_for_response(self):
-        js_script = """
+        view = self.browsers[self.active_service]
+        js = self._build_extract_js()
+        view.page().runJavaScript(js, self._on_response_extracted)
+
+    def _on_response_extracted(self, result):
+        if not result or not isinstance(result, dict):
+            return
+        if not result.get("found"):
+            if time.time() - (self._query_started_at or time.time()) > 60:
+                self._poll_timer and self._poll_timer.stop()
+                self.response_ready.emit("Error: Timeout waiting for response")
+            return
+
+        text = (result.get("text") or "").strip()
+        if len(text) < 10:
+            return
+        if any(t in text.lower() for t in ("thinking", "generating", "loading")):
+            return
+
+        self._poll_timer and self._poll_timer.stop()
+        self.response_ready.emit(text)
+
+    def _build_extract_js(self):
+        return """
         (function() {
-            let latestResponse = '';
             const url = window.location.href;
+            let candidates = [];
 
-            // Provider-specific selectors for assistant responses
             if (url.includes('claude.ai')) {
-                const claudeEls = document.querySelectorAll('[data-testid="chat-assistant-message"] .message-content, .assistant-message, .message-content__text, article[data-testid="chat-message"]');
-                if (claudeEls.length > 0) {
-                    const last = claudeEls[claudeEls.length - 1];
-                    latestResponse = last.innerText || last.textContent || '';
-                }
-            } else if (url.includes('chat.openai.com') || url.includes('chatgpt.com')) {
-                const chatEls = document.querySelectorAll('[data-message-author-role="assistant"] .markdown, [data-message-author-role="assistant"], .group .prose, .text-message');
-                if (chatEls.length > 0) {
-                    const last = chatEls[chatEls.length - 1];
-                    latestResponse = last.innerText || last.textContent || '';
-                }
+                candidates = document.querySelectorAll('[data-testid="chat-assistant-message"], .font-claude-message');
+            } else if (url.includes('chatgpt.com') || url.includes('chat.openai.com')) {
+                candidates = document.querySelectorAll('[data-message-author-role="assistant"] .markdown');
             } else if (url.includes('perplexity.ai')) {
-                const perpEls = document.querySelectorAll('.answer, .ai-response, .prose, [data-testid="copilot-response"]');
-                if (perpEls.length > 0) {
-                    const last = perpEls[perpEls.length - 1];
-                    latestResponse = last.innerText || last.textContent || '';
-                }
+                candidates = document.querySelectorAll('.answer, [data-testid="copilot-response"], .prose');
+            } else {
+                candidates = document.querySelectorAll('[data-message-author-role="assistant"], .assistant-message');
             }
 
-            // Fallback: try generic selectors for any remaining response text
-            if (!latestResponse || latestResponse.length < 20) {
-                const fallbackSelectors = [
-                    '[data-message-author-role="assistant"]:last-child',
-                    '.message:last-child',
-                    '.chat-message:last-child',
-                    '[role="log"] > div:last-child',
-                    '.conversation-container .message:last-child',
-                    'article:last-child .prose',
-                ];
+            const els = Array.from(candidates);
+            const last = els[els.length - 1];
+            if (!last) return { found: false };
 
-                for (const selector of fallbackSelectors) {
-                    try {
-                        const el = document.querySelector(selector);
-                        if (el) {
-                            const text = (el.innerText || el.textContent || '').trim();
-                            if (text.length > 20 &&
-                                !text.toLowerCase().includes('you:') &&
-                                !text.toLowerCase().includes('ask anything')) {
-                                latestResponse = text;
-                                break;
-                            }
-                        }
-                    } catch (e) {}
-                }
-            }
+            const html = last.innerHTML || '';
+            const text = (last.innerText || last.textContent || '').trim();
+            if (text.length < 10) return { found: false };
 
-            // Validate: must be non-empty, non-loading, and reasonably long
-            if (latestResponse && latestResponse.length > 15) {
-                const lowerText = latestResponse.toLowerCase();
-                if (!lowerText.includes('loading') &&
-                    !lowerText.includes('generating') &&
-                    !lowerText.includes('thinking') &&
-                    !lowerText.includes('please wait') &&
-                    !latestResponse.endsWith('...') &&
-                    !latestResponse.endsWith('…')) {
-                    return latestResponse;
-                }
-            }
-
-            return '';
+            return {
+                found: true,
+                text: text,
+                html: html,
+                count: els.length,
+            };
         })();
         """
 
-        if self.active_browser and self.active_browser.page():
-            from PySide6.QtCore import QEventLoop
-            result = [None]
-            loop = QEventLoop()
-
-            def callback(res):
-                result[0] = res
-                loop.quit()
-
-            self.active_browser.page().runJavaScript(js_script, callback)
-            loop.exec()
-
-            return result[0] if result[0] is not None else ""
-        return ""
-
-    def get_page_content(self):
-
-        if self.active_browser and self.active_browser.page():
-            pass
+    def shutdown(self):
+        if self._poll_timer:
+            self._poll_timer.stop()
+        for view in self.browsers.values():
+            view.stop()
+            view.close()
+        self.browsers.clear()

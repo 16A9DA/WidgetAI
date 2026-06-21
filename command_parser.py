@@ -15,7 +15,7 @@ class CommandParser:
         self.valid_commands = [
             "chatgpt", "claude", "perplexity",
             "login", "clear-all", "history",
-            "helpme", "exit",
+            "help", "helpme", "exit",
         ]
 
     def set_callbacks(
@@ -65,7 +65,7 @@ class CommandParser:
                 return self.callbacks["history"]()
             return "History functionality not implemented"
 
-        elif command == "helpme":
+        elif command == "help" or command == "helpme":
             return self._help_text()
 
         elif command == "exit":

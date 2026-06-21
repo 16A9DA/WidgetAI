@@ -1,5 +1,6 @@
 import sys
-import os
+from datetime import datetime
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -8,12 +9,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QTextEdit,
     QLineEdit,
-    QPushButton,
-    QLabel,
 )
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEnginePage
+from PySide6.QtGui import QFont
 
 from browser_handler import BrowserHandler
 from command_parser import CommandParser
@@ -21,40 +18,35 @@ from history_manager import HistoryManager
 from login_manager import LoginManager
 
 
-class QueryWorker(QThread):
-
-    finished = Signal(str)
-
-    def __init__(self, browser_handler, query):
-        super().__init__()
-        self.browser_handler = browser_handler
-        self.query = query
-
-    def run(self):
-
-        try:
-            self.browser_handler.send_query(self.query)
-
-            if self.browser_handler.wait_for_response(timeout_ms=15000):
-                response = self.browser_handler.get_response()
-                if not response:
-                    response = "Error: No response received from service"
-            else:
-                response = "Error: Timeout waiting for response from service"
-
-            self.finished.emit(response)
-        except Exception as e:
-            self.finished.emit(f"Error: {str(e)}")
-
-
 class WIWIWidget(QMainWindow):
+
+    BASE_CSS = """
+    QMainWindow { background: #0b0e14; }
+    QWidget { color: #c9d1d9; font-family: 'JetBrains Mono', 'Menlo', 'Consolas', monospace; }
+    QTextEdit {
+        background: #0d1117;
+        color: #c9d1d9;
+        border: 1px solid #1f262d;
+        selection-background-color: #264f78;
+        padding: 6px;
+        font-size: 11pt;
+    }
+    QLineEdit {
+        background: #161b22;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+        border-radius: 2px;
+        padding: 6px;
+        font-size: 11pt;
+    }
+    QLineEdit:focus { border: 1px solid #58a6ff; }
+    """
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("WIAI Widget")
-        self.setGeometry(100, 100, 350, 500)
-        self.setMinimumSize(300, 400)
-        self.setMaximumSize(800, 600)
+        self.setWindowTitle("WIAI")
+        self.resize(420, 540)
+        self.setMinimumSize(360, 360)
 
         self.history_manager = HistoryManager()
         self.login_manager = LoginManager()
@@ -63,282 +55,205 @@ class WIWIWidget(QMainWindow):
 
         self.active_service = "chatgpt"
         self.current_query = None
+        self._busy = False
 
-        self.setup_ui()
+        self._setup_ui()
+        self._wire_signals()
 
         self.command_parser.set_callbacks(
-            switch=self.switch_service,
-            login=self.handle_login,
-            clearAll=self.clear_all,
-            history=self.show_history,
-            exit=self.handle_exit,
+            switch=self._switch_service,
+            login=self._handle_login,
+            clearAll=self._clear_all,
+            history=self._show_history,
+            exit=self._handle_exit,
         )
 
-        self.check_login_status()
+        self._update_status()
+        self._append_system("WIAI widget ready. Type /helpme for commands.")
 
-    def setup_ui(self):
+    def _setup_ui(self):
+        self.setStyleSheet(self.BASE_CSS)
+        central = QWidget()
+        self.setCentralWidget(central)
 
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
 
-        layout = QVBoxLayout(central_widget)
-        layout.setSpacing(10)
-        layout.setContentsMargins(10, 10, 10, 10)
+        top = QHBoxLayout()
+        self.clock_label = self._make_label("HH:MM:SS", size=10)
+        self.provider_label = self._make_label("chatgpt", size=10, color="#58a6ff")
+        self.login_label = self._make_label("checking...", size=10, color="#8b949e")
 
-        logo_help_layout = QHBoxLayout()
-        self.logo_label = QLabel("WIAI")
-        self.logo_label.setStyleSheet("""
-            QLabel {
-                font-family: 'Courier New', monospace;
-                font-size: 24px;
-                font-weight: bold;
-                color: #FF6B6B;
-                background-color: #1A1A2E;
-                padding: 8px;
-                border-radius: 4px;
-            }
-        """)
-        self.logo_label.setAlignment(Qt.AlignCenter)
-        self.logo_label.setFixedSize(60, 60)
-
-        self.help_label = QLabel("Type /helpme for available commands")
-        self.help_label.setStyleSheet("""
-            QLabel {
-                font-family: 'Arial', sans-serif;
-                font-size: 12px;
-                color: #888;
-                padding: 8px;
-            }
-        """)
-        self.help_label.setAlignment(Qt.AlignVCenter)
-
-        logo_help_layout.addWidget(self.logo_label)
-        logo_help_layout.addWidget(self.help_label)
-        logo_help_layout.addStretch()
-        layout.addLayout(logo_help_layout)
-
-        status_layout = QHBoxLayout()
-        self.status_label = QLabel(f"Active Service: {self.active_service.title()}")
-        self.login_status_label = QLabel("Checking login status...")
-        status_layout.addWidget(self.status_label)
-        status_layout.addStretch()
-        status_layout.addWidget(self.login_status_label)
-        layout.addLayout(status_layout)
+        top.addWidget(self.clock_label)
+        top.addStretch()
+        top.addWidget(self.provider_label)
+        top.addSpacing(8)
+        top.addWidget(self.login_label)
+        root.addLayout(top)
 
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
-        self.chat_display.setPlaceholderText(
-            "Welcome to WIAI Widget! Type your query or use commands like /chatgpt, /claude, /perplexity, /login, /history, /clear-all, /helpme"
-        )
-        self.chat_display.setStyleSheet("""
-            QTextEdit {
-                font-family: 'Courier New', monospace;
-                font-size: 11px;
-                background-color: #16213E;
-                color: #EAF4F4;
-                border: 1px solid #0F3460;
-                border-radius: 4px;
-                padding: 8px;
-            }
-        """)
-        layout.addWidget(self.chat_display)
+        self.chat_display.setPlaceholderText("Type a prompt or /command...")
+        root.addWidget(self.chat_display, 1)
 
-        input_layout = QHBoxLayout()
+        bottom = QHBoxLayout()
         self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("Type your message here...")
-        self.input_field.setStyleSheet("""
-            QLineEdit {
-                font-family: 'Arial', sans-serif;
-                font-size: 12px;
-                padding: 8px;
-                background-color: #0F3460;
-                color: #EAF4F4;
-                border: 1px solid #16213E;
-                border-radius: 4px;
-            }
-            QLineEdit:focus {
-                border: 1px solid #FF6B6B;
-                background-color: #16213E;
-            }
-        """)
-        self.input_field.returnPressed.connect(self.send_message)
+        self.input_field.setPlaceholderText("> _")
+        self.input_field.returnPressed.connect(self._on_submit)
+        bottom.addWidget(self.input_field)
+        root.addLayout(bottom)
 
-        self.send_button = QPushButton("Send")
-        self.send_button.setStyleSheet("""
-            QPushButton {
-                font-family: 'Arial', sans-serif;
-                font-size: 12px;
-                padding: 8px 16px;
-                background-color: #FF6B6B;
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #FF5252;
-            }
-            QPushButton:pressed {
-                background-color: #E53935;
-            }
-        """)
-        self.send_button.clicked.connect(self.send_message)
+        self._clock_timer = QTimer(self)
+        self._clock_timer.setInterval(1000)
+        self._clock_timer.timeout.connect(self._tick_clock)
+        self._clock_timer.start()
+        self._tick_clock()
 
-        input_layout.addWidget(self.input_field)
-        input_layout.addWidget(self.send_button)
-        layout.addLayout(input_layout)
+    def _make_label(self, text, size=10, color="#c9d1d9"):
+        from PySide6.QtWidgets import QLabel
+        lbl = QLabel(text)
+        lbl.setStyleSheet(f"color: {color}; font-size: {size}pt; background: transparent;")
+        return lbl
 
-    def send_message(self):
+    def _wire_signals(self):
+        self.browser_handler.response_ready.connect(self._on_response_ready)
 
+    def _tick_clock(self):
+        now = datetime.now().strftime("%H:%M:%S")
+        self.clock_label.setText(now)
+
+    def _set_busy(self, busy):
+        self._busy = busy
+        self.input_field.setReadOnly(busy)
+        if not busy:
+            self.input_field.setFocus()
+
+    def _append_system(self, text):
+        self._append_line("sys", text, "#8b949e")
+
+    def _append_user(self, text):
+        self._append_line("you", text, "#c9d1d9")
+
+    def _append_assistant(self, text):
+        self._append_line(self.active_service, text, "#7ee787")
+
+    def _append_line(self, prefix, text, color):
+        from html import escape
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.chat_display.append(
+            f"<span style='color:#6e7681'>[{ts}]</span> "
+            f"<span style='color:{color}; font-weight:bold'>{escape(prefix)}</span> "
+            f"<span style='color:#c9d1d9'>{escape(text)}</span>"
+        )
+
+    def _update_status(self):
+        self.provider_label.setText(self.active_service)
+        if self.login_manager.is_logged_in(self.active_service):
+            self.login_label.setText("logged in")
+            self.login_label.setStyleSheet("color: #7ee787; font-size: 10pt; background: transparent;")
+        else:
+            self.login_label.setText("not logged in")
+            self.login_label.setStyleSheet("color: #f85149; font-size: 10pt; background: transparent;")
+
+    def _on_submit(self):
         text = self.input_field.text().strip()
-        if not text:
+        if not text or self._busy:
             return
-
         self.input_field.clear()
 
-        self.chat_display.append(f"<b>You:</b> {text}")
-
         if text.startswith("/"):
-            self.handle_command(text)
+            self._append_user(text)
+            response = self.command_parser.parse_command(text)
+            if response:
+                self._append_system(response)
         else:
-            self.process_query(text)
+            self._append_user(text)
+            self._process_query(text)
 
-    def handle_command(self, command_text):
-
-        response = self.command_parser.parse_command(command_text)
-        if response:
-            self.chat_display.append(f"<b>System:</b> {response}")
-
-    def process_query(self, query):
-
+    def _process_query(self, query):
         if not self.login_manager.is_logged_in(self.active_service):
-            self.chat_display.append(
-                f"<b>System:</b> Please login first using /login command"
-            )
+            self._append_system(f"Please login first: /login {self.active_service}")
             return
 
-        # Build shared memory context from recent history
-        full_query = self._build_contextual_query(query)
-
-        self.chat_display.append("<b>System:</b> Processing...")
-        self.send_button.setEnabled(False)
-        self.input_field.setEnabled(False)
         self.current_query = query
+        self._append_system(f"-> {self.active_service}")
+        self._set_busy(True)
 
-        self.worker = QueryWorker(self.browser_handler, full_query)
-        self.worker.finished.connect(self.query_finished)
-        self.worker.start()
+        if not self.browser_handler.send_query(query):
+            self._append_system("Error: failed to dispatch query")
+            self._set_busy(False)
 
-    def _build_contextual_query(self, query):
-        """Inject recent history as shared memory/context."""
-        history = self.history_manager.get_history()
-        if not history:
-            return query
+    def _on_response_ready(self, response):
+        text = (response or "").strip()
+        if text.startswith("Error:"):
+            self._append_system(text)
+        else:
+            self._append_assistant(text)
 
-        # Get last 3 entries from any provider as context
-        recent = history[-3:]
-        if not recent:
-            return query
+        if self.current_query:
+            self.history_manager.add_entry(self.current_query, text, self.active_service)
+        self.current_query = None
+        self._set_busy(False)
 
-        context_lines = ["Previous context:"]
-        for entry in recent:
-            service = entry.get("service", "unknown")
-            q = entry.get("query", "")
-            r = entry.get("response", "")
-            r_short = (r[:80] + "...") if len(r) > 80 else r
-            context_lines.append(f"  [{service}] {q} -> {r_short}")
-
-        if context_lines:
-            context_lines.append("Current question:")
-            return "\n".join(context_lines) + "\n" + query
-        return query
-
-    def query_finished(self, response):
-
-        self.chat_display.append(
-            f"<b>{self.active_service.title()}:</b> {response}"
-        )
-        self.send_button.setEnabled(True)
-        self.input_field.setEnabled(True)
-        self.input_field.setFocus()
-
-        self.history_manager.add_entry(self.current_query, response, self.active_service)
-
-    def switch_service(self, service):
-
+    def _switch_service(self, service):
+        if service == self.active_service:
+            return f"Already on {service}."
         self.active_service = service
         self.browser_handler.set_active_service(service)
-        self.status_label.setText(f"Active Service: {self.active_service.title()}")
-        self.check_login_status()
-        return f"Switched to {service.title()}"
+        self._update_status()
+        return f"Switched to {service}."
 
-    def handle_login(self, provider=""):
-        # If provider is specified, use it; otherwise use active service
+    def _handle_login(self, provider=""):
         target = provider.lower().strip() if provider.strip() else self.active_service
-
-        if target not in ["chatgpt", "claude", "perplexity"]:
-            return f"Unknown provider '{provider}'. Use: chatgpt, claude, perplexity"
-
-        # Update active service if a different provider was specified
+        if target not in ("chatgpt", "claude", "perplexity"):
+            return f"Unknown provider '{provider}'. Use: chatgpt | claude | perplexity"
         if target != self.active_service:
             self.active_service = target
             self.browser_handler.set_active_service(target)
-            self.status_label.setText(f"Active Service: {self.active_service.title()}")
 
-        self.login_manager.login(target)
-        return f"Login window opened for {target.title()}. Complete login in the browser window."
+        active_view = self.browser_handler.browsers.get(target)
+        self.login_manager.login(target, check_browser=active_view)
+        self._update_status()
+        return f"Login check for {target}. If a window opens, complete sign-in there."
 
-    def clear_all(self):
+    def _clear_all(self):
         self.history_manager.clear()
         self.chat_display.clear()
-        self.chat_display.setPlaceholderText(
-            "Welcome to WIAI Widget! Type your query or use commands like /chatgpt, /claude, /perplexity, /login, /history, /clear-all, /helpme"
-        )
-        return "Chat and history cleared."
-
-    def show_history(self):
-        history = self.history_manager.get_history()
-        if not history:
-            return "No history available"
-
-        lines = []
-        for entry in history[-10:]:
-            service = entry.get("service", "unknown")
-            query = entry.get("query", "")
-            response = entry.get("response", "")
-            # Truncate long responses for display
-            short_response = (response[:120] + "...") if len(response) > 120 else response
-            lines.append(f"[{service}] - {query} = {short_response}")
-
-        return "\n".join(lines)
-
-    def handle_exit(self):
-        self.close()
+        self._append_system("Cleared chat and history.")
         return ""
 
-    def check_login_status(self):
+    def _show_history(self):
+        entries = self.history_manager.get_recent(10)
+        if not entries:
+            return "No history."
+        from html import escape
+        self.chat_display.append(
+            "<span style='color:#58a6ff'>─── history ───</span>"
+        )
+        for e in entries:
+            ts = e.get("timestamp", "")[11:19]
+            svc = e.get("service", "?")
+            q = (e.get("query", "") or "").splitlines()[0][:80]
+            r = (e.get("response", "") or "")[:120].replace("\n", " ")
+            self.chat_display.append(
+                f"<span style='color:#6e7681'>[{ts}]</span> "
+                f"<span style='color:#d29922'>{escape(svc)}</span> "
+                f"<span style='color:#c9d1d9'>Q: {escape(q)}</span><br>"
+                f"<span style='color:#8b9499'>&nbsp;&nbsp;A: {escape(r)}</span>"
+            )
+        return ""
 
-        is_logged_in = self.login_manager.is_logged_in(self.active_service)
-        if is_logged_in:
-            self.login_status_label.setText("✓ Logged in")
-            self.login_status_label.setStyleSheet("color: green;")
-        else:
-            self.login_status_label.setText("✗ Not logged in")
-            self.login_status_label.setStyleSheet("color: red;")
-
-
-    def closeEvent(self, event):
-        """Ensure clean shutdown."""
-        if hasattr(self, "worker") and self.worker and self.worker.isRunning():
-            self.worker.terminate()
-            self.worker.wait()
-        event.accept()
+    def _handle_exit(self):
+        QTimer.singleShot(0, self.close)
+        return ""
 
 
 def main():
-
     app = QApplication(sys.argv)
-    widget = WIWIWidget()
-    widget.show()
+    app.setApplicationName("WIAI")
+    win = WIWIWidget()
+    win.show()
     sys.exit(app.exec())
 
 
