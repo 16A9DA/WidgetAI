@@ -33,11 +33,9 @@ class QueryWorker(QThread):
     def run(self):
 
         try:
-            # Start sending the query
             self.browser_handler.send_query(self.query)
 
-            # Wait for response to be ready (with timeout)
-            if self.browser_handler.wait_for_response(timeout_ms=15000):  # 15 second timeout
+            if self.browser_handler.wait_for_response(timeout_ms=15000):
                 response = self.browser_handler.get_response()
                 if not response:
                     response = "Error: No response received from service"
@@ -53,7 +51,7 @@ class WIWIWidget(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("WIWI Widget")
+        self.setWindowTitle("WIAI Widget")
         self.setGeometry(100, 100, 350, 500)
         self.setMinimumSize(300, 400)
         self.setMaximumSize(800, 600)
@@ -69,10 +67,10 @@ class WIWIWidget(QMainWindow):
         self.setup_ui()
 
         self.command_parser.set_callbacks(
-            switch_service=self.switch_service,
+            switch=self.switch_service,
             login=self.handle_login,
-            clear_all=self.clear_all,
-            show_history=self.show_history,
+            clearAll=self.clear_all,
+            history=self.show_history,
             exit=self.handle_exit,
         )
 
@@ -130,7 +128,7 @@ class WIWIWidget(QMainWindow):
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
         self.chat_display.setPlaceholderText(
-            "Welcome to WIWI Widget! Type your query or use commands like /chatgpt, /claude, /perplexity, /login, /history, /clear-all, /helpme"
+            "Welcome to WIAI Widget! Type your query or use commands like /chatgpt, /claude, /perplexity, /login, /history, /clear-all, /helpme"
         )
         self.chat_display.setStyleSheet("""
             QTextEdit {
@@ -218,18 +216,47 @@ class WIWIWidget(QMainWindow):
             )
             return
 
+        # Build shared memory context from recent history
+        full_query = self._build_contextual_query(query)
+
         self.chat_display.append("<b>System:</b> Processing...")
         self.send_button.setEnabled(False)
         self.input_field.setEnabled(False)
         self.current_query = query
 
-        self.worker = QueryWorker(self.browser_handler, query)
+        self.worker = QueryWorker(self.browser_handler, full_query)
         self.worker.finished.connect(self.query_finished)
         self.worker.start()
 
+    def _build_contextual_query(self, query):
+        """Inject recent history as shared memory/context."""
+        history = self.history_manager.get_history()
+        if not history:
+            return query
+
+        # Get last 3 entries from any provider as context
+        recent = history[-3:]
+        if not recent:
+            return query
+
+        context_lines = ["Previous context:"]
+        for entry in recent:
+            service = entry.get("service", "unknown")
+            q = entry.get("query", "")
+            r = entry.get("response", "")
+            r_short = (r[:80] + "...") if len(r) > 80 else r
+            context_lines.append(f"  [{service}] {q} -> {r_short}")
+
+        if context_lines:
+            context_lines.append("Current question:")
+            return "\n".join(context_lines) + "\n" + query
+        return query
+
     def query_finished(self, response):
 
-        self.chat_display.append(f"<b>{self.active_service.title()}:</b> {response}")
+        self.chat_display.append(
+            f"<b>{self.active_service.title()}:</b> {response}"
+        )
         self.send_button.setEnabled(True)
         self.input_field.setEnabled(True)
         self.input_field.setFocus()
@@ -239,35 +266,54 @@ class WIWIWidget(QMainWindow):
     def switch_service(self, service):
 
         self.active_service = service
+        self.browser_handler.set_active_service(service)
         self.status_label.setText(f"Active Service: {self.active_service.title()}")
+        self.check_login_status()
         return f"Switched to {service.title()}"
 
-    def handle_login(self):
+    def handle_login(self, provider=""):
+        # If provider is specified, use it; otherwise use active service
+        target = provider.lower().strip() if provider.strip() else self.active_service
 
-        self.login_manager.login(self.active_service)
-        return f"Please complete login for {self.active_service.title()} in the opened window"
+        if target not in ["chatgpt", "claude", "perplexity"]:
+            return f"Unknown provider '{provider}'. Use: chatgpt, claude, perplexity"
+
+        # Update active service if a different provider was specified
+        if target != self.active_service:
+            self.active_service = target
+            self.browser_handler.set_active_service(target)
+            self.status_label.setText(f"Active Service: {self.active_service.title()}")
+
+        self.login_manager.login(target)
+        return f"Login window opened for {target.title()}. Complete login in the browser window."
 
     def clear_all(self):
-
         self.history_manager.clear()
         self.chat_display.clear()
-        return "History cleared"
+        self.chat_display.setPlaceholderText(
+            "Welcome to WIAI Widget! Type your query or use commands like /chatgpt, /claude, /perplexity, /login, /history, /clear-all, /helpme"
+        )
+        return "Chat and history cleared."
 
     def show_history(self):
-
         history = self.history_manager.get_history()
         if not history:
             return "No history available"
 
-        history_text = "<b>Conversation History:</b><br>"
+        lines = []
         for entry in history[-10:]:
-            history_text += f"<b>{entry['service'].title()}:</b> {entry['query']} → {entry['response']}<br><br>"
+            service = entry.get("service", "unknown")
+            query = entry.get("query", "")
+            response = entry.get("response", "")
+            # Truncate long responses for display
+            short_response = (response[:120] + "...") if len(response) > 120 else response
+            lines.append(f"[{service}] - {query} = {short_response}")
 
-        return history_text
+        return "\n".join(lines)
 
     def handle_exit(self):
         self.close()
-        return "Exiting application..."
+        return ""
 
     def check_login_status(self):
 
@@ -278,6 +324,14 @@ class WIWIWidget(QMainWindow):
         else:
             self.login_status_label.setText("✗ Not logged in")
             self.login_status_label.setStyleSheet("color: red;")
+
+
+    def closeEvent(self, event):
+        """Ensure clean shutdown."""
+        if hasattr(self, "worker") and self.worker and self.worker.isRunning():
+            self.worker.terminate()
+            self.worker.wait()
+        event.accept()
 
 
 def main():
