@@ -1,17 +1,35 @@
+import os
 import time
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
+from PySide6.QtWebEngineCore import QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
+
+
+SERVICE_URLS = {
+    "chatgpt": "https://chatgpt.com/",
+    "claude": "https://claude.ai/chats",
+    "perplexity": "https://www.perplexity.ai/",
+}
+
+LOGIN_URLS = {
+    "chatgpt": "https://chatgpt.com/auth/login",
+    "claude": "https://claude.ai/login",
+    "perplexity": "https://www.perplexity.ai/account/login",
+}
+
+LOGGED_IN_DOMAINS = {
+    "chatgpt": ["chatgpt.com"],
+    "claude": ["claude.ai"],
+    "perplexity": ["perplexity.ai"],
+}
+
+LOGIN_PATH_FRAGMENTS = ("/login", "/auth", "/signin", "/signup")
 
 
 class BrowserHandler(QObject):
 
     response_ready = Signal(str)
-
-    SERVICE_URLS = {
-        "chatgpt": "https://chatgpt.com/",
-        "claude": "https://claude.ai/chats",
-        "perplexity": "https://www.perplexity.ai/",
-    }
+    login_state_changed = Signal(str, bool)
 
     def __init__(self, login_manager):
         super().__init__()
@@ -19,48 +37,129 @@ class BrowserHandler(QObject):
         self.browsers = {}
         self.active_service = None
         self._pending_query = None
-        self._known_response_count = 0
         self._poll_timer = None
         self._query_started_at = None
+        self._login_timers = {}
+        self._login_started_at = {}
 
+        self._setup_profile()
         self._init_browsers()
 
+    def _setup_profile(self):
+        profile = QWebEngineProfile.defaultProfile()
+        profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
+        )
+        cache_path = os.path.expanduser("~/.wiai/profile")
+        os.makedirs(cache_path, exist_ok=True)
+        profile.setCachePath(cache_path)
+        profile.setPersistentStoragePath(cache_path)
+
     def _init_browsers(self):
-        for service, url in self.SERVICE_URLS.items():
+        for service, url in SERVICE_URLS.items():
             view = QWebEngineView()
-            view.setVisible(False)
             view.resize(1280, 800)
+            view.setVisible(False)
             view.load(QUrl(url))
             self.browsers[service] = view
 
         self.set_active_service("chatgpt")
 
     def set_active_service(self, service):
-        if service in self.browsers:
-            self.active_service = service
-            view = self.browsers[service]
-            if view.url() and view.url().toString() != self.SERVICE_URLS[service]:
-                view.load(QUrl(self.SERVICE_URLS[service]))
-            return True
-        return False
-
-    def show_active_browser(self):
-        if self.active_service and self.active_service in self.browsers:
-            view = self.browsers[self.active_service]
-            view.setVisible(True)
-            view.show()
-            view.raise_()
-            view.activateWindow()
-
-    def send_query(self, query):
-        if not self.active_service:
+        if service not in self.browsers:
             return False
 
-        view = self.browsers[self.active_service]
-        url = view.url().toString()
+        for s, v in self.browsers.items():
+            if s != service and v.isVisible():
+                v.hide()
 
-        if not self.SERVICE_URLS[self.active_service].split("/")[2] in url:
-            view.loadFinished.connect(lambda ok, s=self.active_service: self._run_inject(s, query))
+        self.active_service = service
+        view = self.browsers[service]
+        url = view.url().toString()
+        target = SERVICE_URLS[service]
+        if not url or url == "about:blank" or url.split("/")[2] != target.split("/")[2]:
+            view.load(QUrl(target))
+        return True
+
+    def _active_view(self):
+        if self.active_service and self.active_service in self.browsers:
+            return self.browsers[self.active_service]
+        return None
+
+    def begin_login(self, service):
+        view = self.browsers.get(service)
+        if not view:
+            return False
+        if service != self.active_service:
+            self.set_active_service(service)
+        url = self.login_manager.login_url(service)
+        if not url:
+            return False
+        view.show()
+        view.raise_()
+        view.setVisible(True)
+        view.load(QUrl(url))
+        self.login_manager.mark_logged_in(service, False)
+
+        if service in self._login_timers:
+            self._login_timers[service].stop()
+
+        timer = QTimer()
+        timer.setInterval(1500)
+        timer.timeout.connect(lambda s=service: self._poll_login(s))
+        timer.start()
+        self._login_timers[service] = timer
+        self._login_started_at[service] = time.time()
+        return True
+
+    def _poll_login(self, service):
+        view = self.browsers.get(service)
+        if not view or not view.page():
+            return
+
+        def _cb(result):
+            self._on_login_checked(service, result)
+
+        js = self._login_check_js(service)
+        view.page().runJavaScript(js, _cb)
+
+        elapsed = time.time() - self._login_started_at.get(service, time.time())
+        if elapsed > 900:
+            self._stop_login_poll(service)
+
+    def _on_login_checked(self, service, is_logged_in):
+        if is_logged_in:
+            self.login_manager.mark_logged_in(service, True)
+            self._stop_login_poll(service)
+            view = self.browsers.get(service)
+            if view and service != self.active_service:
+                view.hide()
+            self.login_state_changed.emit(service, True)
+
+    def _login_check_js(self, service):
+        login_path = " || ".join(
+            [f"path.includes('{frag}')" for frag in LOGIN_PATH_FRAGMENTS]
+        )
+        return f"""
+        (function() {{
+            const path = window.location.pathname;
+            if ({login_path}) return false;
+            if (path.length > 1 && !path.startsWith('/auth')) return true;
+            try {{
+                const main = document.querySelector('main, [role="main"], nav, button[aria-haspopup="menu"]');
+                if (main) return true;
+            }} catch (e) {{}}
+            return false;
+        }})();
+        """
+
+    def send_query(self, query):
+        view = self._active_view()
+        if not view or not self.active_service:
+            return False
+        url = view.url().toString()
+        if not url or url == "about:blank":
+            view.loadFinished.connect(lambda ok, v=view, q=query: self._inject_query(v, q))
         else:
             self._inject_query(view, query)
 
@@ -69,13 +168,8 @@ class BrowserHandler(QObject):
         self._start_response_polling()
         return True
 
-    def _run_inject(self, service, query):
-        if service in self.browsers and query:
-            self._inject_query(self.browsers[service], query)
-
     def _inject_query(self, view, query):
-        js = self._build_inject_js(query)
-        view.page().runJavaScript(js)
+        view.page().runJavaScript(self._build_inject_js(query))
 
     def _build_inject_js(self, query):
         escaped = (
@@ -116,7 +210,7 @@ class BrowserHandler(QObject):
                 p.textContent = '{escaped}';
                 input.appendChild(p);
             }}
-            input.value = input.tagName === 'TEXTAREA' ? '{escaped}' : input.innerText;
+            if (input.tagName === 'TEXTAREA') input.value = '{escaped}';
 
             input.dispatchEvent(new Event('input', {{ bubbles: true }}));
             input.dispatchEvent(new Event('change', {{ bubbles: true }}));
@@ -138,7 +232,6 @@ class BrowserHandler(QObject):
     def _start_response_polling(self):
         if self._poll_timer:
             self._poll_timer.stop()
-
         self._poll_timer = QTimer()
         self._poll_timer.setInterval(1500)
         self._poll_timer.timeout.connect(self._poll_response)
@@ -146,12 +239,10 @@ class BrowserHandler(QObject):
 
     @Slot()
     def _poll_response(self):
-        if not self.active_service:
+        view = self._active_view()
+        if not view:
             return
-
-        view = self.browsers[self.active_service]
-        js = self._build_extract_js()
-        view.page().runJavaScript(js, self._on_response_extracted)
+        view.page().runJavaScript(self._build_extract_js(), self._on_response_extracted)
 
     def _on_response_extracted(self, result):
         if not result or not isinstance(result, dict):
@@ -191,22 +282,30 @@ class BrowserHandler(QObject):
             const last = els[els.length - 1];
             if (!last) return { found: false };
 
-            const html = last.innerHTML || '';
             const text = (last.innerText || last.textContent || '').trim();
             if (text.length < 10) return { found: false };
 
-            return {
-                found: true,
-                text: text,
-                html: html,
-                count: els.length,
-            };
+            return { found: true, text: text };
         })();
         """
+
+    def show_active_browser(self):
+        view = self._active_view()
+        if view:
+            view.show()
+            view.raise_()
+            view.activateWindow()
+
+    def hide_active_browser(self):
+        view = self._active_view()
+        if view:
+            view.hide()
 
     def shutdown(self):
         if self._poll_timer:
             self._poll_timer.stop()
+        for timer in self._login_timers.values():
+            timer.stop()
         for view in self.browsers.values():
             view.stop()
             view.close()

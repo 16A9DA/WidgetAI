@@ -118,6 +118,11 @@ class WIWIWidget(QMainWindow):
 
     def _wire_signals(self):
         self.browser_handler.response_ready.connect(self._on_response_ready)
+        self.browser_handler.login_state_changed.connect(self._on_login_state_changed)
+
+    def _on_login_state_changed(self, service, logged_in):
+        self._append_system(f"login state: {service} -> {'logged in' if logged_in else 'logged out'}")
+        self._update_status()
 
     def _tick_clock(self):
         now = datetime.now().strftime("%H:%M:%S")
@@ -212,10 +217,9 @@ class WIWIWidget(QMainWindow):
             self.active_service = target
             self.browser_handler.set_active_service(target)
 
-        active_view = self.browser_handler.browsers.get(target)
-        self.login_manager.login(target, check_browser=active_view)
+        self.browser_handler.begin_login(target)
         self._update_status()
-        return f"Login check for {target}. If a window opens, complete sign-in there."
+        return f"Login window opened for {target}. Sign in there; you'll stay logged in afterwards."
 
     def _clear_all(self):
         self.history_manager.clear()
