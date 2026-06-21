@@ -1,7 +1,7 @@
 import sys
 from datetime import datetime
 from html import escape
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -60,7 +60,6 @@ class WIWIWidget(QMainWindow):
         self.active_service = "chatgpt"
         self.current_query = None
         self._busy = False
-        self._drag_pos = None
 
         self._setup_ui()
         self._wire_signals()
