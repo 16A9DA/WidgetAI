@@ -1,90 +1,68 @@
 import re
 
+import providers
+
+COMMANDS = [
+    "chatgpt", "claude", "perplexity",
+    "login", "history", "clear-all",
+    "debug", "help", "helpme", "exit",
+]
+
 
 class CommandParser:
 
     def __init__(self):
-        self.callbacks = {
-            "switch": None,
-            "login": None,
-            "clear_all": None,
-            "history": None,
-            "exit": None,
-            "helpme": None,
-        }
-        self.valid_commands = [
-            "chatgpt", "claude", "perplexity",
-            "login", "clear-all", "history",
-            "help", "helpme", "exit",
-        ]
+        self.callbacks = {}
 
-    def set_callbacks(
-        self, switch=None, login=None, clearAll=None, history=None, exit=None
-    ):
-        if switch:
-            self.callbacks["switch"] = switch
-        if login:
-            self.callbacks["login"] = login
-        if clearAll:
-            self.callbacks["clear_all"] = clearAll
-        if history:
-            self.callbacks["history"] = history
-        if exit:
-            self.callbacks["exit"] = exit
+    def bind(self, **callbacks):
+        self.callbacks.update(callbacks)
 
-    def parse_command(self, command_text):
-        command_text = command_text.strip()
+    def is_command(self, text: str) -> bool:
+        return text.strip().startswith("/")
 
-        match = re.match(r"/([a-zA-Z0-9_-]+)\s*(.*)", command_text)
+    def parse(self, text: str) -> str:
+        match = re.match(r"/([a-zA-Z0-9_-]+)\s*(.*)", text.strip())
         if not match:
-            return "Unknown command format. Use /command [args]"
+            return "Unknown command. Try /help"
 
-        command = match.group(1).lower()
-        args = match.group(2).strip() if match.group(2) else ""
+        cmd = match.group(1).lower()
+        args = match.group(2).strip()
 
-        if command not in self.valid_commands:
-            return "Unknown command. Use /helpme to see available commands"
+        if cmd not in COMMANDS:
+            return f"Unknown command '/{cmd}'. Try /help"
 
-        if command in ["chatgpt", "claude", "perplexity"]:
-            if self.callbacks["switch"]:
-                return self.callbacks["switch"](command)
-            return f"Switching to {command}..."
+        if cmd in providers.ORDER:
+            return self._call("switch", cmd)
+        if cmd == "login":
+            return self._call("login", args)
+        if cmd == "history":
+            return self._call("history")
+        if cmd == "clear-all":
+            return self._call("clear_all")
+        if cmd == "debug":
+            return self._call("debug")
+        if cmd == "exit":
+            return self._call("exit")
+        if cmd in ("help", "helpme"):
+            return self.help_text()
+        return ""
 
-        elif command == "login":
-            if self.callbacks["login"]:
-                return self.callbacks["login"](args)
-            return "Login functionality not implemented"
+    def _call(self, name, *args):
+        cb = self.callbacks.get(name)
+        return cb(*args) if cb else ""
 
-        elif command == "clear-all":
-            if self.callbacks["clear_all"]:
-                return self.callbacks["clear_all"]()
-            return "Clear all functionality not implemented"
-
-        elif command == "history":
-            if self.callbacks["history"]:
-                return self.callbacks["history"]()
-            return "History functionality not implemented"
-
-        elif command == "help" or command == "helpme":
-            return self._help_text()
-
-        elif command == "exit":
-            if self.callbacks["exit"]:
-                return self.callbacks["exit"]()
-            return "Exit functionality not implemented"
-
-    def _help_text(self):
-        lines = [
-            ("/command", "usage"),
+    def help_text(self) -> str:
+        rows = [
             ("/chatgpt", "switch to ChatGPT"),
             ("/claude", "switch to Claude"),
             ("/perplexity", "switch to Perplexity"),
-            ("/login [provider]", "log in to a provider"),
+            ("/login [provider]", "sign in (current provider if omitted)"),
             ("/history", "show recent history"),
-            ("/clear-all", "clear output and history"),
-            ("/help", "show this help"),
-            ("/helpme", "alias of /help"),
-            ("/exit", "quit the widget"),
+            ("/clear-all", "clear output and stored history"),
+            ("/debug", "show what extraction finds on the page"),
+            ("/help, /helpme", "show this help"),
+            ("/exit", "close the widget"),
         ]
-        max_cmd = max(len(cmd) for cmd, _ in lines)
-        return "\n".join(f"{cmd:<{max_cmd + 4}}{desc}" for cmd, desc in lines)
+        width = max(len(c) for c, _ in rows) + 3
+        body = "\n".join(f"{c:<{width}}{d}" for c, d in rows)
+        return "commands:\n" + body + "\n(plain text is sent to the active provider)"

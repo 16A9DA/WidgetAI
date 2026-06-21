@@ -1,36 +1,26 @@
+
+
 from PySide6.QtCore import QObject, Signal
 
-
-LOGIN_URLS = {
-    "chatgpt": "https://chatgpt.com/auth/login",
-    "claude": "https://claude.ai/login",
-    "perplexity": "https://www.perplexity.ai/account/login",
-}
+import providers
 
 
 class LoginManager(QObject):
 
-    login_changed = Signal(str, bool)
+    login_changed = Signal(str, bool)  
 
     def __init__(self):
         super().__init__()
-        self._states = {"chatgpt": False, "claude": False, "perplexity": False}
+        self._states = {key: False for key in providers.ORDER}
 
-    def is_logged_in(self, service):
-        return self._states.get(service, False)
+    def is_logged_in(self, key: str) -> bool:
+        return self._states.get(key, False)
 
-    def mark_logged_in(self, service, value=True):
-        if service not in self._states:
+    def mark(self, key: str, value: bool = True):
+        if key not in self._states or self._states[key] == value:
             return
-        if self._states[service] == value:
-            return
-        self._states[service] = value
-        self.login_changed.emit(service, value)
+        self._states[key] = value
+        self.login_changed.emit(key, value)
 
-    def logout(self, service):
-        if service not in self._states:
-            return
-        self.mark_logged_in(service, False)
-
-    def login_url(self, service):
-        return LOGIN_URLS.get(service)
+    def login_url(self, key: str) -> str:
+        return providers.get(key).login_url if providers.exists(key) else ""

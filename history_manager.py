@@ -2,51 +2,45 @@ import json
 import os
 from datetime import datetime
 
+DEFAULT_PATH = os.path.expanduser("~/.wiai/history.json")
+MAX_ENTRIES = 200
+
 
 class HistoryManager:
 
-    def __init__(self, history_file="history.json"):
-        self.history_file = history_file
-        self.history = self.load_history()
+    def __init__(self, path: str = DEFAULT_PATH):
+        self.path = path
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self.entries = self._load()
 
-    def load_history(self):
-        """Load history from file."""
-        if os.path.exists(self.history_file):
-            try:
-                with open(self.history_file, "r") as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError):
-                return []
-        return []
-
-    def save_history(self):
-        """Save history to file."""
+    def _load(self):
         try:
-            with open(self.history_file, "w") as f:
-                json.dump(self.history, f, indent=2)
-        except IOError:
-            pass  # Silently fail if we can't save
+            with open(self.path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else []
+        except (FileNotFoundError, json.JSONDecodeError, IOError):
+            return []
 
-    def add_entry(self, query, response, service):
-        """Add a new entry to history."""
-        entry = {
-            "timestamp": datetime.now().isoformat(),
+    def _save(self):
+        try:
+            with open(self.path, "w", encoding="utf-8") as f:
+                json.dump(self.entries[-MAX_ENTRIES:], f, indent=2)
+        except IOError:
+            pass
+
+    def add(self, provider: str, query: str, response: str):
+        self.entries.append({
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "provider": provider,
             "query": query,
             "response": response,
-            "service": service,
-        }
-        self.history.append(entry)
-        self.save_history()
+        })
+        self.entries = self.entries[-MAX_ENTRIES:]
+        self._save()
 
-    def get_history(self):
-        """Get all history entries."""
-        return self.history.copy()
+    def recent(self, count: int = 10):
+        return self.entries[-count:]
 
     def clear(self):
-        """Clear all history."""
-        self.history = []
-        self.save_history()
-
-    def get_recent(self, count=10):
-        """Get recent history entries."""
-        return self.history[-count:] if self.history else []
+        self.entries = []
+        self._save()
